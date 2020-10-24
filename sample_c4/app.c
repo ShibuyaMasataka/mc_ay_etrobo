@@ -11,6 +11,7 @@
 #include "ev3api.h"
 #include "app.h"
 #include "etroboc_ext.h"
+//#include <math.h>  /* M_PI */
 
 #if defined(BUILD_MODULE)
     #include "module_cfg.h"
@@ -94,6 +95,17 @@ static void _log(char* text);
 //static void tail_control(signed int angle);
 //static void backlash_cancel(signed char lpwm, signed char rpwm, int32_t *lenc, int32_t *renc);
 
+#define DELTA_T 0.004
+#define KP 5
+#define KI 4
+#define KD 0.1
+#define M_PI 3.141592653589793
+static double diff[2];
+static double integral;
+static double preError;
+
+static double run_distance;
+
 /* メインタスク */
 void main_task(intptr_t unused)
 {
@@ -163,6 +175,8 @@ void main_task(intptr_t unused)
 
     ev3_led_set_color(LED_GREEN); /* スタート通知 */
 
+    float count = 0;
+
     /**
     * Main loop
     */
@@ -170,21 +184,84 @@ void main_task(intptr_t unused)
     {
         if (ev3_button_is_pressed(BACK_BUTTON)) break;
 
-        if (sonar_alert() == 1) /* 障害物検知 */
+        //if (sonar_alert() == 1) /* 障害物検知 */
+        //{
+        //    printf("sonar_alert\n");
+        //    forward = turn = 0; /* 障害物を検知したら停止 */
+        //}
+        //else
+        //{
+        forward = 60; /* 前進命令 */
+
+        //if (run_distance >= 0){
+        //     forward = 60 + count;
+        //     if (count < 30){
+        //         count = count + 0.2;
+        //     }
+        // }
+
+
+        //printf("%d\n", (int)forward);
+
+        //if (count > 0){
+            double p, i, d;
+            double sensor_val = ev3_color_sensor_get_reflect(color_sensor);
+            rgb_raw_t rgb_val;
+            ev3_color_sensor_get_rgb_raw(color_sensor, &rgb_val);
+            //if (sensor_val > 30.0)
+            //    sensor_val = 30.0;
+            //printf("================");
+            //printf("%d\n", (int)rgb_val.r);
+            //printf("%d\n", (int)rgb_val.g);
+            //printf("%d\n", (int)rgb_val.b);
+            // 青色でライントレース
+            sensor_val = rgb_val.r;
+
+            //double target_val = (LIGHT_WHITE + LIGHT_BLACK)/2;
+            double target_val = 20;
+
+            diff[0] = diff[1];
+            diff[1] = sensor_val - target_val;
+            integral += (diff[1] + diff[0]) / 2.0 * DELTA_T;
+
+            p = KP * diff[1];
+            i = KI * integral;
+            d = KD * (diff[1]- diff[0]) / DELTA_T;
+
+            double pid = p + i + d;
+            if (pid < -100.0)
+               pid = -100.0;
+            else if (pid > 100.0)
+               pid = 100.0;
+
+            turn = -pid * _EDGE;
+            //forward = forward - abs(turn) * 0.3;
+        //}
+        //else{
+        //    turn = 0;
+        //}
+
+        //if ((abs(turn) / 4) < 60)
+        //    forward = forward - (abs(turn) / 4);
+        //else
+        //    forward = forward - 60;
+        //printf("%d\n", (int)turn);
+
+            // if (ev3_color_sensor_get_reflect(color_sensor) >= (LIGHT_WHITE + LIGHT_BLACK)/2)
+            // {
+            //     turn = -80 * _EDGE; /* 右旋回命令　(右コースは逆) */
+            // }
+            // else
+            // {
+            //     turn =  80 * _EDGE; /* 左旋回命令　(右コースは逆) */
+            // }
+        //}
+
+        if ((rgb_val.r > 200) && (rgb_val.g > 150) && (rgb_val.b < 50))
         {
-            forward = turn = 0; /* 障害物を検知したら停止 */
-        }
-        else
-        {
-            forward = 30; /* 前進命令 */
-            if (ev3_color_sensor_get_reflect(color_sensor) >= (LIGHT_WHITE + LIGHT_BLACK)/2)
-            {
-                turn = -80 * _EDGE; /* 右旋回命令　(右コースは逆) */
-            }
-            else
-            {
-                turn =  80 * _EDGE; /* 左旋回命令　(右コースは逆) */
-            }
+            printf("stop");
+            forward = 0;
+            turn = 0;
         }
 
         /* 左右モータでロボットのステアリング操作を行う */
@@ -194,6 +271,15 @@ void main_task(intptr_t unused)
             (int)forward,
             (int)turn
         );
+
+        //double left_motor_val = ev3_motor_get_power(left_motor);
+        //double right_motor_val = ev3_motor_get_power(right_motor);
+        //int radius = 45;
+        //double dist_left = 2.0 * M_PI * radius * left_motor_val / 360.0;
+        //double dist_right = 2.0 * M_PI * radius * right_motor_val / 360.0;
+        //run_distance += (dist_left + dist_right) / 2.0;
+
+        //printf("%d\n", (int)run_distance);
 
         tslp_tsk(4 * 1000U); /* 4msec周期起動 */
     }
